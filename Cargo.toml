@@ -1,0 +1,13 @@
+[package]
+name = "myrient-filter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+regex = "1.11.1"
+reqwest = "0.12.12"
+scraper = "0.22.0"
+serde = { version = "1.0.217", features = ["derive"] }
+tokio = { version = "1.43.0", features = ["full"] }
+url = "2.5.4"
+urlencoding = "2.1.3"
