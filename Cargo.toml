@@ -2,6 +2,9 @@
 name = "myrient-filter"
 version = "0.1.0"
 edition = "2021"
+description = "HTTP Directory scraper and filter for Myrient"
+license = "MIT"
+
 
 [dependencies]
 regex = "1.11.1"
