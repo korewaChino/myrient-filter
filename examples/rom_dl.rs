@@ -109,7 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     const DOWNLOAD_PATH: &str = "snes/";
     let download_path = PathBuf::from(DOWNLOAD_PATH);
 
-    println!("Listing ROMs for {}:", SNES);
+    // let list = lister.list(Some(format!("No-Intro/{SNES}").as_str())).await?;
+
+    // println!("{:#?}", list);
     for rom in lister.list_roms(SNES, "No-Intro").await? {
         if let Err(e) = download_rom(&rom, &download_path).await {
             eprintln!("Failed to download {}: {}", rom.filename, e);

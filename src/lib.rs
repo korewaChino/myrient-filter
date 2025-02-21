@@ -27,6 +27,23 @@ pub struct RomLister {
     options: FilterOptions,
 }
 
+#[derive(Debug)]
+pub struct HttpDirectory {
+    pub name: String,
+}
+
+#[derive(Debug)]
+pub enum HttpListEntry {
+    Directory(HttpDirectory),
+    Rom(Rom),
+}
+
+impl HttpDirectory {
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
+}
+
 impl RomLister {
     pub fn new(options: FilterOptions) -> Self {
         Self {
@@ -40,33 +57,14 @@ impl RomLister {
         &self,
         subdir: Option<&str>,
     ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let url = match subdir {
-            Some(path) => format!("{}{}/", BASE_URL, path),
-            None => BASE_URL.to_string(),
-        };
-        println!("Fetching directories from: {}", url);
-
-        let response = self.client.get(&url).send().await?.text().await?;
-        let document = Html::parse_document(&response);
-        let selector = Selector::parse("tbody > tr > td.link > a").unwrap();
-
-        let dirs: Vec<String> = document
-            .select(&selector)
-            .skip(1) // Skip parent directory link
-            .filter(|link| {
-                let href = link.value().attr("href").unwrap_or("");
-                href.ends_with('/') // Only include directory entries
+        let entries = self.list(subdir).await?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                HttpListEntry::Directory(dir) => Some(dir.name),
+                _ => None,
             })
-            .map(|link| {
-                let href = link.value().attr("href").unwrap();
-                let trimmed = href.trim_end_matches('/');
-                urlencoding::decode(trimmed)
-                    .expect("Invalid UTF-8")
-                    .into_owned()
-            })
-            .collect();
-
-        Ok(dirs)
+            .collect())
     }
 
     pub async fn list_rom_urls(
@@ -74,30 +72,15 @@ impl RomLister {
         system: &str,
         subdir: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let encoded_system = system.replace(" ", "%20");
-        let url = format!("{}{}/{}/", BASE_URL, subdir, encoded_system);
-        println!("Fetching ROMs from: {}", url);
-
-        let response = self.client.get(&url).send().await?.text().await?;
-        let document = Html::parse_document(&response);
-        let selector = Selector::parse("tbody > tr > td.link > a").unwrap();
-
-        let urls: Vec<String> = document
-            .select(&selector)
-            .skip(1)
-            .filter(|link| self.is_valid_file(link.value().attr("href").unwrap_or("")))
-            .map(|link| {
-                let href = link.value().attr("href").unwrap();
-                if !href.starts_with("http") {
-                    // Construct full URL preserving the system path
-                    format!("{}{}/{}/{}", BASE_URL, subdir, encoded_system, href)
-                } else {
-                    href.to_string()
-                }
+        let path = format!("{}/{}", subdir, system.replace(" ", "%20"));
+        let entries = self.list(Some(&path)).await?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                HttpListEntry::Rom(rom) => Some(rom.url),
+                _ => None,
             })
-            .collect();
-
-        Ok(urls)
+            .collect())
     }
 
     pub async fn list_roms(
@@ -155,6 +138,51 @@ impl RomLister {
         }
 
         Ok(final_roms)
+    }
+
+    pub async fn list(
+        &self,
+        path: Option<&str>,
+    ) -> Result<Vec<HttpListEntry>, Box<dyn std::error::Error>> {
+        let url = match path {
+            Some(p) => format!("{}{}/", BASE_URL, p),
+            None => BASE_URL.to_string(),
+        };
+        println!("Fetching entries from: {}", url);
+
+        let response = self.client.get(&url).send().await?.text().await?;
+        let document = Html::parse_document(&response);
+        let selector = Selector::parse("tbody > tr > td.link > a").unwrap();
+
+        let entries: Vec<HttpListEntry> = document
+            .select(&selector)
+            .skip(1) // Skip parent directory link
+            .filter_map(|link| {
+                let href = link.value().attr("href")?;
+                let decoded = urlencoding::decode(href).ok()?;
+
+                if href.ends_with('/') {
+                    // Directory entry
+                    let name = decoded.trim_end_matches('/').to_string();
+                    Some(HttpListEntry::Directory(HttpDirectory::new(name)))
+                } else if self.is_valid_file(href) {
+                    // ROM entry
+                    let url = if !href.starts_with("http") {
+                        format!("{}{}", url, href)
+                    } else {
+                        href.to_string()
+                    };
+                    Some(HttpListEntry::Rom(Rom {
+                        filename: decoded.into_owned(),
+                        url,
+                    }))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(entries)
     }
 
     fn is_valid_file(&self, href: &str) -> bool {
